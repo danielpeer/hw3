@@ -22,7 +22,7 @@ int g_init = 0;
 extern double ssd_util;
 
 /*buffer */
-int BUFFER_SIZE=4096;
+#define BUFFER_SIZE 4096
 int BUFFER_CURR_SIZE;
 
 void FTL_INIT(void)
@@ -68,12 +68,12 @@ void FTL_INIT(void)
 }
 
 void INIT_BUFFER(){
-	BUFFER_CURR_SIZE=0;
+	BUFFER_CURR_SIZE = 0;
 }
 
-void WRITE_TO_BUFFER(int32_t lba ,unsigned int length,int num_of_pages){
-		BUFFER_CURR_SIZE+=length;
-		UPDATE_PAGES_LOCATION(lba,num_of_pages);	
+void WRITE_TO_BUFFER(int32_t lba, unsigned int length, int num_of_pages){
+		BUFFER_CURR_SIZE += length;
+		UPDATE_PAGES_LOCATION(lba, num_of_pages);	
 }
 
 		
@@ -292,17 +292,18 @@ int _FTL_WRITE(int32_t sector_nb, unsigned int length)
 
 
 	int32_t lba = sector_nb;
-	int num_of_pages=(int)length/SECTORS_PER_PAGE;
-	float compression_ratio=(double)rand()/((double)RAND_MAX);
-	unsigned int compression_length=(unsigned int)compression_ratio*length;
-	if(sector_nb +compression_length > SECTOR_NB){
+	int num_of_pages = (int)length/SECTORS_PER_PAGE;
+	float compression_ratio = (double)rand() / (double)RAND_MAX;
+	/*TODO why address lenght? what if request is 8kb (2 pages)? we need to compress each 4k! (for row below)*/
+	unsigned int compression_length = (unsigned int)compression_ratio * length; 
+	if(sector_nb + compression_length > SECTOR_NB){
    		printf("ERROR[%s] Exceed Sector number\n", __FUNCTION__);
         return FAIL;   
 	}
 	//check if there is enough space in the buffer 
-	if(BUFFER_SIZE-BUFFER_CURR_SIZE>=compression_length){
-		WRITE_TO_BUFFER(lba,compression_length,num_of_pages);
-	//need to change	return 1;
+	if(BUFFER_SIZE - BUFFER_CURR_SIZE >= compression_length){
+		WRITE_TO_BUFFER(lba, compression_length, num_of_pages);
+		return SUCCESS;
 	}
 
 
@@ -310,7 +311,6 @@ int _FTL_WRITE(int32_t sector_nb, unsigned int length)
 
 	int io_page_nb;
 	io_alloc_overhead = ALLOC_IO_REQUEST(sector_nb, length, WRITE, &io_page_nb);
-//	}
 	int32_t lpn;
 	int32_t new_ppn;
 	int32_t old_ppn;

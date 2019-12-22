@@ -72,10 +72,10 @@ void INIT_MAPPING_LOCATIONS(void)
 	/* Allocation Memory mapping_locations; */
 	mapping_locations = (int32_t *)calloc(PAGE_MAPPING_ENTRY_NB, sizeof(int32_t));
 	if(mapping_locations == NULL){
-		printf("ERROR[%s] Calloc  mapping_locations fail\n", __FUNCTION__);
+		printf("ERROR[%s] Calloc  mapping_locations failed.\n", __FUNCTION__);
 	}
 	int i;
-	for(i=0;i<PAGE_MAPPING_ENTRY_NB;i++){
+	for(i=0; i<PAGE_MAPPING_ENTRY_NB; i++){
 			if (mapping_table[i]!=-1){
 				mapping_locations[i]=i;
 				SET_MAPPING_COUNTER(i,GET_MAPPING_COUNTER(i)+1);
@@ -93,7 +93,7 @@ void UPDATE_PAGES_LOCATION(int32_t lba, int num_of_pages)
 	int i;
 	for(i=lpn;i<lpn+num_of_pages;i++)
 		if(mapping_locations[i]>=0){
-		SET_MAPPING_COUNTER(mapping_locations[i],GET_MAPPING_COUNTER(mapping_locations[i])-1)	;
+			SET_MAPPING_COUNTER(mapping_locations[i],GET_MAPPING_COUNTER(mapping_locations[i])-1);
 		}
 		mapping_locations[i]=IN_BUFFER;
 }
@@ -101,15 +101,15 @@ void UPDATE_PAGES_LOCATION(int32_t lba, int num_of_pages)
 
 int32_t GET_PAGE_LOCATION(int32_t lpn){
 	return mapping_locations[lpn];
-
 }
+
 void FLASH_TO_SSD(int32_t new_lpn){
 	for(int i=0;i<PAGE_MAPPING_ENTRY_NB;i++){
-		if(mapping_locations[i]==-2){
-		mapping_locations[i]=new_lpn;
-		SET_MAPPING_COUNTER(new_lpn,GET_MAPPING_COUNTER(new_lpn)+1);
-}
-}
+		if(mapping_locations[i] == -2){
+			mapping_locations[i] = new_lpn;
+			SET_MAPPING_COUNTER(new_lpn,GET_MAPPING_COUNTER(new_lpn)+1);
+		}
+	}
 }
 
 void TERM_MAPPING_TABLE(void)
