@@ -20,5 +20,3 @@ void FTL_WRITE(int32_t sector_nb, unsigned int length);
 
 int _FTL_READ(int32_t sector_nb, unsigned int length);
 int _FTL_WRITE(int32_t sector_nb, unsigned int length);
-
-void INIT_BUFFER();

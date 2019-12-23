@@ -20,10 +20,99 @@ FILE* fp_ftl_r;
 
 int g_init = 0;
 extern double ssd_util;
-
+struct Buffer* compression_buffer;
 /*buffer */
-#define BUFFER_SIZE 4096
-int BUFFER_CURR_SIZE;
+#define BUFFER_SIZE_BYTES 4096
+
+
+typedef struct BufferPageItem{
+	int32_t lpn;
+	struct BufferPageItem* next;
+}BufferPageItem;
+
+typedef struct Buffer{
+	int size_in_pages;
+	int current_size_bytes;
+	int max_size_bytes;
+	int32_t buffer_lba;
+	struct BufferPageItem *head;
+	struct BufferPageItem *tail;
+} Buffer;
+
+struct BufferPageItem* createBufferPageItem(int32_t lba){
+	struct BufferPageItem* page_item = (struct BufferPageItem*) malloc(sizeof(struct BufferPageItem));
+	if(page_item == NULL){
+		printf("ERROR[%s] Could not allocate memory for BufferPageItem\n", __FUNCTION__);
+	}
+	page_item->lpn = lba % (int32_t)SECTORS_PER_PAGE;
+	page_item->next = NULL;
+	return page_item;
+}
+
+struct Buffer* createBuffer(void){
+	struct Buffer* buffer = (struct Buffer*) malloc(sizeof(struct Buffer));
+	if(buffer == NULL){
+		printf("ERROR[%s] Could not allocate memory for Buffer\n", __FUNCTION__);
+	}
+	buffer->current_size_bytes = 0;
+	buffer->max_size_bytes = BUFFER_SIZE_BYTES;
+	buffer->buffer_lba = -1;
+	buffer->size_in_pages = 0;
+	buffer->head = NULL;
+	buffer->tail = NULL;
+}
+
+void insertBufferPageItem(Buffer* buffer, int32_t lba, unsigned int size_bytes){
+	struct BufferPageItem *node;
+	node = createBufferPageItem(lba);
+	if (buffer->head == NULL){/*meaning empty buffer*/
+		buffer->head = node;
+		buffer->tail = node;
+	} else{
+		buffer->tail->next = node;
+		buffer->tail = node;
+	}
+	buffer->size_in_pages++;
+	buffer->current_size_bytes += size_bytes;
+}
+
+void freeBufferContent(Buffer* buffer){
+	struct BufferPageItem* temp, *temp_to_free;
+	temp = buffer->head;
+	while(temp->next != NULL){
+		temp_to_free = temp;
+		temp = temp->next;
+		free(temp_to_free);
+	}
+	free(temp);
+	buffer->buffer_lba = -1;
+	buffer->current_size_bytes = 0;
+	buffer->size_in_pages = 0;
+	buffer->head = NULL;
+	buffer->tail = NULL;
+}
+
+void freeBuffer(Buffer* buffer){
+	freeBufferContent(buffer);
+	free(buffer);
+}
+
+void updateMappignsAfterBufferFlush(Buffer* buffer, int32_t lpn){
+	struct BufferPageItem *temp;
+	temp = buffer->head;
+	while(temp != NULL){
+		UPDATE_AFTER_FLUSH_BUFFER(lpn, temp->lpn);	
+		temp = temp->next;
+	}
+}
+
+void INIT_COMPRESSION_BUFFER(){
+	compression_buffer = createBuffer();
+}
+
+void TERM_COMPRESSION_BUFFER(){
+	freeBuffer(compression_buffer);
+}
 
 void FTL_INIT(void)
 {
@@ -32,15 +121,15 @@ void FTL_INIT(void)
 
 		INIT_SSD_CONFIG();
 		INIT_MAPPING_TABLE();
-		INIT_MAPPING_LOCATIONS();
 		INIT_MAPPING_COUNTER_TABLE();
+		INIT_ADVANCED_LPN_MAPPING();
 		INIT_INVERSE_MAPPING_TABLE();
 		INIT_BLOCK_STATE_TABLE();
 		INIT_VALID_ARRAY();
 		INIT_EMPTY_BLOCK_LIST();
 		INIT_VICTIM_BLOCK_LIST();
 		INIT_PERF_CHECKER();
-		INIT_BUFFER();
+		INIT_COMPRESSION_BUFFER();
 		
 #ifdef FTL_MAP_CACHE
 		INIT_CACHE();
@@ -67,18 +156,13 @@ void FTL_INIT(void)
 	}
 }
 
-void INIT_BUFFER(){
-	BUFFER_CURR_SIZE = 0;
+void WRITE_TO_BUFFER(int32_t lba, unsigned int length){
+	if(compression_buffer->current_size_bytes == 0){ /*either just initiated or just flushed*/
+		compression_buffer->buffer_lba = lba;
+	}
+	insertBufferPageItem(compression_buffer, lba, length);
+	UPDATE_PAGES_LOCATION(lba);	
 }
-
-void WRITE_TO_BUFFER(int32_t lba, unsigned int length, int num_of_pages){
-		BUFFER_CURR_SIZE += length;
-		UPDATE_PAGES_LOCATION(lba, num_of_pages);	
-}
-
-		
-
-
 
 void FTL_TERM(void){
 	printf("[%s] start\n", __FUNCTION__);
@@ -88,11 +172,14 @@ void FTL_TERM(void){
 #endif
 	TERM_MAPPING_TABLE();
 	TERM_INVERSE_MAPPING_TABLE();
+	TERM_ADVANCED_LPN_MAPPING();
+	TERM_MAPPING_COUNTER_TABLE();
 	TERM_VALID_ARRAY();
 	TERM_BLOCK_STATE_TABLE();
 	TERM_EMPTY_BLOCK_LIST();
 	TERM_VICTIM_BLOCK_LIST();
 	TERM_PERF_CHECKER();
+	TERM_COMPRESSION_BUFFER();
 
 #ifdef MONITOR_ON
 	TERM_LOG_MANAGER();
@@ -280,51 +367,24 @@ int _FTL_READ(int32_t sector_nb, unsigned int length)
 	return ret;
 }
 
-int _FTL_WRITE(int32_t sector_nb, unsigned int length)
+int WRITE_BUFFER_TO_FTL(void)
 {
-#ifdef FTL_DEBUG
-	printf("[%s] Start\n", __FUNCTION__);
-#endif
-
-#ifdef FTL_GET_WRITE_WORKLOAD
-	fprintf(fp_write_workload,"%d\t%u\n", sector_nb, length);
-#endif
-
-
-	int32_t lba = sector_nb;
-	int num_of_pages = (int)length/SECTORS_PER_PAGE;
-	float compression_ratio = (double)rand() / (double)RAND_MAX;
-	/*TODO why address lenght? what if request is 8kb (2 pages)? we need to compress each 4k! (for row below)*/
-	unsigned int compression_length = (unsigned int)compression_ratio * length; 
-	if(sector_nb + compression_length > SECTOR_NB){
-   		printf("ERROR[%s] Exceed Sector number\n", __FUNCTION__);
-        return FAIL;   
-	}
-	//check if there is enough space in the buffer 
-	if(BUFFER_SIZE - BUFFER_CURR_SIZE >= compression_length){
-		WRITE_TO_BUFFER(lba, compression_length, num_of_pages);
-		return SUCCESS;
-	}
-
-
-	//no space in buffer
-
 	int io_page_nb;
-	io_alloc_overhead = ALLOC_IO_REQUEST(sector_nb, length, WRITE, &io_page_nb);
+	/*we flush only 4k at a time - which is SECTORS_PER_PAGE*/
+	io_alloc_overhead = ALLOC_IO_REQUEST(compression_buffer->buffer_lba, SECTORS_PER_PAGE, WRITE, &io_page_nb);
 	int32_t lpn;
 	int32_t new_ppn;
 	int32_t old_ppn;
 
-	unsigned int remain = length;
-	unsigned int left_skip = sector_nb % SECTORS_PER_PAGE;
+	unsigned int remain = SECTORS_PER_PAGE;
+	unsigned int left_skip = compression_buffer->buffer_lba % SECTORS_PER_PAGE;
 	unsigned int right_skip;
 	unsigned int write_sects;
 
 	unsigned int ret = FAIL;
-	int write_page_nb=0;
+	int write_page_nb = 0;
 
 	while(remain > 0){
-
 		if(remain > SECTORS_PER_PAGE - left_skip){
 			right_skip = 0;
 		}
@@ -334,21 +394,21 @@ int _FTL_WRITE(int32_t sector_nb, unsigned int length)
 
 		write_sects = SECTORS_PER_PAGE - left_skip - right_skip;
 
-#ifdef FIRM_IO_BUFFER
-		INCREASE_WB_FTL_POINTER(write_sects);
-#endif
+		#ifdef FIRM_IO_BUFFER
+				INCREASE_WB_FTL_POINTER(write_sects);
+		#endif
 
-#ifdef WRITE_NOPARAL
-		ret = GET_NEW_PAGE(VICTIM_NOPARAL, empty_block_table_index, &new_ppn);
-#else
-		ret = GET_NEW_PAGE(VICTIM_OVERALL, EMPTY_TABLE_ENTRY_NB, &new_ppn);
-#endif
+		#ifdef WRITE_NOPARAL
+				ret = GET_NEW_PAGE(VICTIM_NOPARAL, empty_block_table_index, &new_ppn);
+		#else
+				ret = GET_NEW_PAGE(VICTIM_OVERALL, EMPTY_TABLE_ENTRY_NB, &new_ppn);
+		#endif
 		if(ret == FAIL){
 			printf("ERROR[%s] Get new page fail \n", __FUNCTION__);
 			return FAIL;
 		}
 
-		lpn = GET_FREE_LBA();
+		lpn = GET_FREE_LPN();
 		old_ppn = GET_MAPPING_INFO(lpn);
 
 		if((left_skip || right_skip) && (old_ppn != -1)){
@@ -356,8 +416,7 @@ int _FTL_WRITE(int32_t sector_nb, unsigned int length)
 				CALC_FLASH(old_ppn), CALC_BLOCK(old_ppn), CALC_PAGE(old_ppn),
 				CALC_FLASH(new_ppn), CALC_BLOCK(new_ppn), CALC_PAGE(new_ppn),
 				write_page_nb, WRITE, io_page_nb);
-		}
-		else{
+		} else{
 			ret = SSD_PAGE_WRITE(CALC_FLASH(new_ppn), CALC_BLOCK(new_ppn), CALC_PAGE(new_ppn), write_page_nb, WRITE, io_page_nb);
 		}
 		
@@ -366,25 +425,22 @@ int _FTL_WRITE(int32_t sector_nb, unsigned int length)
 		UPDATE_OLD_PAGE_MAPPING(lpn);
 		UPDATE_NEW_PAGE_MAPPING(lpn, new_ppn);
 
-#ifdef FTL_DEBUG
-                if(ret == SUCCESS){
-                        printf("\twrite complete [%d, %d, %d]\n",CALC_FLASH(new_ppn), CALC_BLOCK(new_ppn),CALC_PAGE(new_ppn));
-                }
-                else if(ret == FAIL){
-                        printf("ERROR[%s] %d page write fail \n",__FUNCTION__, new_ppn);
-                }
-#endif
-		lba += write_sects;
+		#ifdef FTL_DEBUG
+						if(ret == SUCCESS){
+								printf("\twrite complete [%d, %d, %d]\n",CALC_FLASH(new_ppn), CALC_BLOCK(new_ppn),CALC_PAGE(new_ppn));
+						}
+						else if(ret == FAIL){
+								printf("ERROR[%s] %d page write fail \n",__FUNCTION__, new_ppn);
+						}
+		#endif
+		compression_buffer->buffer_lba += write_sects;
 		remain -= write_sects;
 		left_skip = 0;
-
 	}
-	FLASH_TO_SSD(lpn);
-	WRITE_TO_BUFFER(lba,compression_length,num_of_pages);
-
-	
-
+	updateMappignsAfterBufferFlush(compression_buffer ,lpn);
+	freeBufferContent(compression_buffer);
 	INCREASE_IO_REQUEST_SEQ_NB();
+
 #ifdef GC_ON
 	GC_CHECK(CALC_FLASH(new_ppn), CALC_BLOCK(new_ppn));
 #endif
@@ -395,7 +451,7 @@ int _FTL_WRITE(int32_t sector_nb, unsigned int length)
 
 #ifdef MONITOR_ON
 	char szTemp[1024];
-	sprintf(szTemp, "WRITE PAGE %d ", length);
+	sprintf(szTemp, "WRITE PAGE %d ", SECTORS_PER_PAGE);
 	WRITE_LOG(szTemp);
 	sprintf(szTemp, "WB CORRECT %d", write_page_nb);
 	WRITE_LOG(szTemp);
@@ -404,5 +460,41 @@ int _FTL_WRITE(int32_t sector_nb, unsigned int length)
 #ifdef FTL_DEBUG
 	printf("[%s] End\n", __FUNCTION__);
 #endif
-return ret;
+
+	return ret;
+}	
+
+int _FTL_WRITE(int32_t sector_nb, unsigned int length)
+{
+#ifdef FTL_DEBUG
+	printf("[%s] Start\n", __FUNCTION__);
+#endif
+
+#ifdef FTL_GET_WRITE_WORKLOAD
+	fprintf(fp_write_workload,"%d\t%u\n", sector_nb, length);
+#endif
+
+	unsigned int ret = SUCCESS;
+	int32_t lba = sector_nb;
+	int num_of_pages = (int)length/SECTORS_PER_PAGE; /*every page is 4KB by default*/
+	int compress_rounds, not_all_request_in_buffer = 0;
+	float compressed_info_size;
+	float compression_ratio;
+	if(sector_nb + length > SECTOR_NB){
+   		printf("ERROR[%s] Exceed Sector number\n", __FUNCTION__);
+        return FAIL;   
+	}
+	for (compress_rounds=0; compress_rounds<num_of_pages; compress_rounds++){
+		compression_ratio = (double)rand() / (double)RAND_MAX;
+		compressed_info_size = compression_ratio * PAGE_SIZE; 
+		if(compression_buffer->max_size_bytes - compression_buffer->current_size_bytes >= compressed_info_size){
+			WRITE_TO_BUFFER(lba, compressed_info_size); /*a single page is compressed in to the buffer at a time*/
+			lba += SECTORS_PER_PAGE;
+		} else{ /* no space in buffer - so we flush him and then continue */ 
+			ret = WRITE_BUFFER_TO_FTL();
+			WRITE_TO_BUFFER(lba, compressed_info_size);
+			lba += SECTORS_PER_PAGE;	
+		}
+	}	
+	return ret;
 }

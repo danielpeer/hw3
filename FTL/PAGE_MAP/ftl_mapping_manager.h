@@ -28,14 +28,16 @@ unsigned int CALC_FLASH(int32_t ppn);
 unsigned int CALC_BLOCK(int32_t ppn);
 unsigned int CALC_PAGE(int32_t ppn);
 
-void INIT_MAPPING_LOCATIONS(void);
-void UPDATE_PAGES_LOCATION(int32_t lba, unsigned int length);
+void INIT_ADVANCED_LPN_MAPPING(void);
+void TERM_ADVANCED_LPN_MAPPING(void);
+void UPDATE_PAGES_LOCATION(int32_t lba);
 int32_t GET_PAGE_LOCATION(int32_t lpn);
-void FLASH_TO_SSD(int64_t lpn);
+void UPDATE_AFTER_FLUSH_BUFFER(int32_t new_lpn, int32_t mapping_location_index);
 
 
 void INIT_MAPPING_COUNTER_TABLE(void);
+void TERM_MAPPING_COUNTER_TABLE(void);
 int32_t GET_MAPPING_COUNTER(int32_t lpn);
-void SET_MAPPING_COUNTER(int32_t lpn,int counter);
-int32_t GET_FREE_LBA();
+void SET_MAPPING_COUNTER(int32_t lpn, int counter);
+int32_t GET_FREE_LPN();
 #endif
