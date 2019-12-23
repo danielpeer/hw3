@@ -104,10 +104,8 @@ int32_t GET_PAGE_LOCATION(int32_t lpn){
 }
 
 void UPDATE_AFTER_FLUSH_BUFFER(int32_t new_lpn, int32_t mapping_location_index){
-	if(mapping_locations[mapping_location_index] == -2){
-		mapping_locations[mapping_location_index] = new_lpn;
-		SET_MAPPING_COUNTER(new_lpn, GET_MAPPING_COUNTER(new_lpn)+1);
-	}
+	mapping_locations[mapping_location_index] = new_lpn;
+	SET_MAPPING_COUNTER(new_lpn, GET_MAPPING_COUNTER(new_lpn)+1);
 }
 
 void TERM_MAPPING_TABLE(void)

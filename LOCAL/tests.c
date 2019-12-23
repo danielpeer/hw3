@@ -17,7 +17,8 @@ int test_access()
 	int ret, i, lba;
 
 	// write entire device 
-	for(i=0;i<SECTOR_NB;i+=SECTORS_PER_PAGE){
+	//SSD_WRITE(5*SECTORS_PER_PAGE, 0);
+	for(i=0;i<(int)SECTOR_NB*0.05;i+=SECTORS_PER_PAGE){
 		if ((i/SECTORS_PER_PAGE) % 1024*10==0){
 			LOG("wrote %.3lf of device", (double)i  / (double)SECTOR_NB);
 		}
@@ -27,6 +28,17 @@ int test_access()
 	}
 
 	printf("wrote seq\n");
+
+	for(i=0;i<(int)SECTOR_NB*0.05;i+=SECTORS_PER_PAGE){
+		if ((i/SECTORS_PER_PAGE) % 1024*10==0){
+			LOG("read %.3lf of device", (double)i  / (double)SECTOR_NB);
+		}
+
+		lba = i % SECTOR_NB;
+		SSD_READ(SECTORS_PER_PAGE, lba);
+	}
+
+	printf("read seq\n");
 
 	return 0;
 }

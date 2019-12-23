@@ -44,7 +44,7 @@ struct BufferPageItem* createBufferPageItem(int32_t lba){
 	if(page_item == NULL){
 		printf("ERROR[%s] Could not allocate memory for BufferPageItem\n", __FUNCTION__);
 	}
-	page_item->lpn = lba % (int32_t)SECTORS_PER_PAGE;
+	page_item->lpn = lba / (int32_t)SECTORS_PER_PAGE;
 	page_item->next = NULL;
 	return page_item;
 }
@@ -192,6 +192,11 @@ void FTL_TERM(void){
 	printf("[%s] complete\n", __FUNCTION__);
 }
 
+int READ_FROM_COMPRESSION_BUFFER(void)
+{
+	return SUCCESS;
+}
+
 void FTL_READ(int32_t sector_nb, unsigned int length)
 {
 	int ret;
@@ -212,7 +217,23 @@ void FTL_READ(int32_t sector_nb, unsigned int length)
 	int64_t start_ftl_r, end_ftl_r;
 	start_ftl_r = get_usec();
 #endif
-	ret = _FTL_READ(sector_nb, length);
+	int32_t lba = sector_nb;
+	int amount_of_buffer_attemps;
+	int num_of_pages = (int)length/SECTORS_PER_PAGE; /*every page is 4KB by default*/
+	int info_location;
+	int32_t lpn;
+	for (amount_of_buffer_attemps=0; amount_of_buffer_attemps<num_of_pages; amount_of_buffer_attemps++){
+		lpn = lba / (int32_t)SECTORS_PER_PAGE;
+		info_location = GET_PAGE_LOCATION(lpn);
+		if(info_location == -2){ /*lpn is in buffer*/
+			ret = READ_FROM_COMPRESSION_BUFFER();	
+		}
+		else{
+			ret = _FTL_READ(lba, SECTORS_PER_PAGE);
+		}
+		lba += SECTORS_PER_PAGE;
+	}
+
 #ifdef FTL_IO_LATENCY
 	end_ftl_r = get_usec();
 	if(length >= 128)
@@ -258,7 +279,7 @@ int _FTL_READ(int32_t sector_nb, unsigned int length)
 		printf("Error[%s] Exceed Sector number\n", __FUNCTION__); 
 		return FAIL;	
 	}
-
+	
 	int32_t lpn;
 	int32_t ppn;
 	int32_t lba = sector_nb;
@@ -270,6 +291,8 @@ int _FTL_READ(int32_t sector_nb, unsigned int length)
 	unsigned int ret = FAIL;
 	int read_page_nb = 0;
 	int io_page_nb;
+	
+	
 
 #ifdef FIRM_IO_BUFFER
 	INCREASE_RB_FTL_POINTER(length);
