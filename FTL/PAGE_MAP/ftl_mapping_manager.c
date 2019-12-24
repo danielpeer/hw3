@@ -12,6 +12,8 @@ void* block_table_start;
 int32_t* mapping_locations;
 int32_t* mapping_counter_table;
 
+int32_t FREE_LAST_LPN=0;
+
 
 void INIT_MAPPING_TABLE(void)
 {
@@ -53,11 +55,27 @@ void SET_MAPPING_COUNTER(int32_t lpn, int counter){
 }
 
 int32_t GET_FREE_LPN(){
-	int i;
-	for(i=0;i<PAGE_MAPPING_ENTRY_NB;i++){
-		if(GET_MAPPING_COUNTER(i) == 0){
-			return i;
-		}
+	int lpn;
+	if (FREE_LAST_LPN!=-1){
+			lpn=FREE_LAST_LPN;
+			if(FREE_LAST_LPN<PAGE_MAPPING_ENTRY_NB-1&&GET_MAPPING_COUNTER(FREE_LAST_LPN+1)==0){
+				FREE_LAST_LPN+=1;
+			}
+			else{
+				FREE_LAST_LPN=-1;
+			}
+			return lpn;
+	}
+	for(lpn=0;lpn<PAGE_MAPPING_ENTRY_NB;lpn++){
+			if(GET_MAPPING_COUNTER(lpn)==0){
+				if(lpn<PAGE_MAPPING_ENTRY_NB-1&&GET_MAPPING_COUNTER(lpn+1)==0){
+					FREE_LAST_LPN=lpn+1;
+				}
+				else{
+					FREE_LAST_LPN=-1;
+				}
+				return lpn;
+			}
 	}
 	printf("ERROR[%s] did not find free lpn - this cant be!\n", __FUNCTION__);
 	return -1;
